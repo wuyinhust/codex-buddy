@@ -22,7 +22,7 @@ echo "==> 安装依赖 ..."
 pip install -r requirements.txt
 
 if [ ! -f .env ]; then
-  echo "==> 创建 .env 模板，请编辑后重新运行启动命令 ..."
+  echo "==> 创建 .env 模板 ..."
   cat > .env <<'EOF'
 # CodeBuddy2api 鉴权模式：api_key（推荐）或 oauth
 CODEBUDDY_AUTH_MODE=api_key
@@ -34,9 +34,13 @@ CODEBUDDY_API_KEY=your_codebuddy_api_key_here
 # CODEBUDDY_MODELS=auto-chat
 EOF
   echo ""
-  echo "⚠️  请编辑 $TARGET_DIR/.env，填入你的 CODEBUDDY_API_KEY，然后运行："
-  echo "    cd $TARGET_DIR && source venv/bin/activate && python web.py"
+  echo "⚠️  请编辑 $TARGET_DIR/.env，填入你的 CODEBUDDY_API_KEY，然后重新运行本脚本。"
   exit 0
+fi
+
+if grep -q "your_codebuddy_api_key_here\|^CODEBUDDY_API_KEY=$" .env; then
+  echo "⚠️  $TARGET_DIR/.env 里的 CODEBUDDY_API_KEY 还是占位符，请填入真实 Key 后再运行。"
+  exit 1
 fi
 
 echo "==> 启动 CodeBuddy2api ..."
