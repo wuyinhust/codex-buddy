@@ -121,7 +121,9 @@ Copy the contents of [`PROMPT.md`](PROMPT.md) into a Codex chat. Codex will inst
 
 ---
 
-## Run opencodex as a Background Service
+## Run opencodex as a Local Background Service
+
+> Note: `opencodex` is a separate community open-source project (installed via npm). This section only describes how to use its background-service feature; it is not our code or service.
 
 So you don't need to keep a terminal open:
 
@@ -158,6 +160,115 @@ If the response contains `"tool_calls"`, Codex can read, edit, and execute. If n
 
 ---
 
+## Bridge Without opencodex: codex-buddy-gateway
+
+If you prefer not to install `opencodex`, the repo ships a lightweight gateway, `codex-buddy-gateway.py`. It translates Codex's **Responses API** (`/v1/responses`) into CodeBuddy2api's **Chat Completions** (`/v1/chat/completions`) in real time — including streaming `tool_calls` translation so Codex can use tools normally.
+
+```mermaid
+flowchart LR
+    Codex["Codex App / CLI"] -->|Responses API| GW["codex-buddy-gateway\n127.0.0.1:8787"]
+    GW -->|Chat Completions| Proxy["CodeBuddy2api\n127.0.0.1:8001"]
+    Proxy --> CodeBuddy["CodeBuddy (CN / Intl)"]
+```
+
+### 1. Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### 2. Start the gateway
+
+```bash
+python codex-buddy-gateway.py
+# Listens on http://127.0.0.1:8787/v1, upstream http://127.0.0.1:8001/codebuddy/v1
+```
+
+Override with env vars: `CODEBUDDY_BASE_URL`, `CODEBUDDY_API_KEY`, `CODEBUDDY_MODEL` (default `kimi-k3`), `GATEWAY_HOST`, `GATEWAY_PORT` (default `8787`).
+
+### 3. Point Codex at the gateway
+
+Set Codex's API Base to `http://127.0.0.1:8787/v1` and use Responses mode (`wire_api = "responses"`). Model names follow CodeBuddy's naming (`kimi-k3`, `hy3-high`, ...).
+
+### 4. Verify
+
+```bash
+curl http://127.0.0.1:8787/health
+curl http://127.0.0.1:8787/v1/models
+python test_gateway_dryrun.py   # mock upstream; no real model needed
+```
+
+---
+
+## GPT-Kimi Orchestrator
+
+If you want GPT to act as the director and Kimi as the actor, use `gpt-kimi-orchestrator.py`. It splits work into **plan → delegate → review**:
+
+1. **Plan**: GPT breaks the request into sub-tasks and assigns a model to each.
+2. **Delegate**: Each sub-task is sent to a CodeBuddy model (default `kimi-k3`).
+3. **Review**: GPT synthesizes the sub-task results into the final answer.
+
+### Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### Configuration
+
+Environment variables (or a `.env` file):
+
+```bash
+export OPENAI_API_KEY="sk-..."           # key for the orchestrator GPT
+export ORCHESTRATOR_MODEL="gpt-4o-mini"  # orchestrator model
+
+# Worker defaults to the local CodeBuddy2api endpoint
+export WORKER_BASE_URLS="http://127.0.0.1:8001/codebuddy/v1"
+```
+
+Multi-account failover:
+
+```bash
+export WORKER_BASE_URLS="http://127.0.0.1:8001/codebuddy/v1,http://127.0.0.1:8002/codebuddy/v1"
+export WORKER_API_KEYS="dummy,dummy"
+export WORKER_ACCOUNT_NAMES="account-a,account-b"
+```
+
+### Usage
+
+```bash
+python gpt-kimi-orchestrator.py "Write a Python script that converts Markdown to PDF"
+```
+
+### Common scenarios
+
+#### 1. How do I use Kimi K3?
+
+Set the default worker model:
+
+```bash
+export WORKER_DEFAULT_MODEL="kimi-k3"
+```
+
+Or simply mention it in the task, e.g. "Refactor this function using Kimi K3."
+
+#### 2. How do I fall back to the limited-time free Hy3 when Kimi has no quota?
+
+```bash
+export WORKER_DEFAULT_MODEL="kimi-k3"
+export WORKER_FALLBACK_MODEL="hy3-high"
+```
+
+When `kimi-k3` fails due to quota or rate limits, the orchestrator automatically falls back to `hy3-high`.
+
+### Token tracking and account switching
+
+- Tracks `prompt_tokens` / `completion_tokens` after every call.
+- Marks an account as exhausted on `429` or quota-related `403`, then tries the next one.
+- If all accounts fail, it falls back to the fallback model.
+
+---
+
 ## Repository Layout
 
 ```
@@ -165,11 +276,24 @@ codex-buddy/
 ├── README.md                 # This file
 ├── README_ZH.md              # 简体中文
 ├── PROMPT.md                 # Paste into Codex to auto-configure
+├── requirements.txt          # Python dependencies
+├── gpt-kimi-orchestrator.py  # Standalone GPT-Kimi orchestrator
+├── codex-buddy-gateway.py    # /v1/responses → /v1/chat/completions bridge (no opencodex)
+├── test_gateway_dryrun.py    # Gateway dry-run test (mock upstream)
 ├── scripts/
 │   └── setup-codebuddy2api.sh # Start CodeBuddy2api
 ├── TROUBLESHOOTING.md        # Common issues
 └── LICENSE                   # MIT
 ```
+
+---
+
+## Third-party Dependencies
+
+- `opencodex`: A community-maintained local proxy (npm package `@bitkyc08/opencodex` / `lidge-jun/opencodex`) that translates Codex's Responses API into third-party model protocols. It is installed independently via npm and is governed by its own license.
+- `CodeBuddy2api`: [`Sliverkiss/CodeBuddy2api`](https://github.com/Sliverkiss/CodeBuddy2api), which wraps the official CodeBuddy API as an OpenAI-compatible interface. It is installed independently via Git and is governed by its own license.
+
+`codex-buddy` does not include the source code of either project; it only provides configuration and scripts to connect them.
 
 ---
 
