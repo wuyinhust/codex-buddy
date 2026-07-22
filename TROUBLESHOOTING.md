@@ -1,44 +1,62 @@
-# 常见问题排查
+# Troubleshooting
 
-## 1. Codex 里没有出现 CodeBuddy 模型
+## 1. No CodeBuddy model appears in Codex
 
-- 确认 `ocx start` 已运行：`ocx health` 应返回健康。
-- 确认 `ocx provider list` 能看到 `codebuddy` 且为 default。
-- 完全退出 Codex App（含托盘图标）后重新打开。
+- Make sure `ocx start` is running: `ocx health` should report healthy.
+- Make sure `ocx provider list` shows `codebuddy` and it is marked as default.
+- Fully quit Codex App (including the tray icon) and reopen it.
+- Run `ocx sync` to refresh the model catalog.
 
-## 2. 选择模型后请求失败 / 401 / 403
+## 2. Requests fail with 401 / 403
 
-- 确认 **CodeBuddy2api** 已启动：`curl http://127.0.0.1:8001/codebuddy/v1/models` 应返回模型列表。
-- 确认 `CodeBuddy2api/.env` 里的 `CODEBUDDY_API_KEY` 已填且有效。
-- 查看 CodeBuddy2api 终端日志里的具体报错。
+- Confirm CodeBuddy2api is running: `curl http://127.0.0.1:8001/codebuddy/v1/models`.
+- Confirm `CodeBuddy2api/.env` has a valid `CODEBUDDY_API_KEY`.
+- Confirm `CODEBUDDY_INTERNET_ENVIRONMENT` matches your account edition:
+  - `internal` or `ioa` → China edition (`copilot.tencent.com`)
+  - `public` → International edition (`www.codebuddy.ai`)
+- Read the CodeBuddy2api terminal log for the exact error.
 
-## 3. Codex 只能聊天，不会调用工具
+## 3. Codex only chats, does not call tools
 
-- 跑 README 里的 `curl` 自检命令，看 CodeBuddy2api 是否返回 `tool_calls`。
-  - 无 `tool_calls` → CodeBuddy 后端/账号未开通 function calling，换模型或联系 CodeBuddy 开放平台。
-  - 有 `tool_calls` → 问题在网关层，检查 `ocx` 是否正常运行。
+- Run the verification curl in the README/PROMPT and check for `"tool_calls"`.
+  - No `"tool_calls"` → your CodeBuddy account/model does not have function calling enabled. Try another model or contact CodeBuddy support.
+  - Has `"tool_calls"` → check that `ocx` is forwarding tools correctly; restart with `ocx stop && ocx start`.
 
-## 4. `ocx provider add` 报错 loopback address
+## 4. `ocx provider add` rejects the base URL
 
-必须加 `--allow-private-network` 参数，因为 CodeBuddy2api 跑在本地 127.0.0.1。
+You must include `--allow-private-network` because CodeBuddy2api runs on `127.0.0.1`.
 
-## 5. 想切回 OpenAI 官方模型
+## 5. China edition vs International edition
+
+| Edition | `CODEBUDDY_INTERNET_ENVIRONMENT` | Domain | Typical models |
+|---------|----------------------------------|--------|----------------|
+| China | `internal` (default) | `copilot.tencent.com` | Kimi, Hunyuan, DeepSeek, GLM, MiniMax |
+| International | `public` | `www.codebuddy.ai` | GPT-5, Claude-4, Gemini-2.5 |
+
+If you set the wrong edition, CodeBuddy2api will talk to the wrong backend and authentication will fail.
+
+## 6. Background processes stop after closing the terminal
+
+CodeBuddy2api and `ocx start` are tied to the terminal session by default. To keep them running:
+
+```bash
+ocx service install
+ocx service start
+```
+
+For CodeBuddy2api, run it inside `tmux`/`screen` or use your OS service manager.
+
+## 7. Switch back to OpenAI
 
 ```bash
 ocx restore
 ```
 
-## 6. 后台进程关了怎么办
+## 8. Cannot push to GitHub from mainland China
 
-CodeBuddy2api 和 `ocx start` 是前台/后台进程，关闭终端可能退出。可用 `tmux`/`screen` 常驻，或 `ocx service` 把 ocx 注册为系统服务。
-
-## 7. 在中国大陆无法 `git push` 到 GitHub
-
-本仓库文件通过 `gh api` Contents API 上传。如需本地 push，可配置 git 代理：
+`git push` to `github.com:443` may be blocked. Use the `gh api` Contents API instead, or configure a proxy:
 
 ```bash
 git config --global http.proxy http://127.0.0.1:7890
 git config --global https.proxy http://127.0.0.1:7890
 ```
-
-端口根据你的实际代理调整。
