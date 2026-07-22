@@ -1,47 +1,52 @@
 #!/usr/bin/env bash
 set -e
 
-# 一键下载并启动 CodeBuddy2api（OpenAI 兼容代理）
-# 用法：./scripts/setup-codebuddy2api.sh [目录名]
-# 默认目录：./CodeBuddy2api
+# Start CodeBuddy2api — an OpenAI-compatible proxy for Tencent CodeBuddy.
+# Usage: ./scripts/setup-codebuddy2api.sh [directory]
+# Default directory: ./CodeBuddy2api
 
 TARGET_DIR="${1:-./CodeBuddy2api}"
 
 if [ ! -d "$TARGET_DIR" ]; then
-  echo "==> 克隆 Sliverkiss/CodeBuddy2api 到 $TARGET_DIR ..."
+  echo "==> Cloning Sliverkiss/CodeBuddy2api into $TARGET_DIR ..."
   git clone https://github.com/Sliverkiss/CodeBuddy2api.git "$TARGET_DIR"
 fi
 
 cd "$TARGET_DIR"
 
-echo "==> 创建 Python 虚拟环境 ..."
+echo "==> Creating Python virtual environment ..."
 python3 -m venv venv
 source venv/bin/activate
 
-echo "==> 安装依赖 ..."
+echo "==> Installing dependencies ..."
 pip install -r requirements.txt
 
 if [ ! -f .env ]; then
-  echo "==> 创建 .env 模板 ..."
+  echo "==> Creating .env template ..."
   cat > .env <<'EOF'
-# CodeBuddy2api 鉴权模式：api_key（推荐）或 oauth
+# CodeBuddy edition:
+#   internal / ioa  = China edition (copilot.tencent.com)
+#   public          = International edition (www.codebuddy.ai)
+CODEBUDDY_INTERNET_ENVIRONMENT=internal
+
+# Authentication mode: api_key (recommended) or oauth
 CODEBUDDY_AUTH_MODE=api_key
 
-# 你的 CodeBuddy 开放平台 API Key
+# Your CodeBuddy API Key
 CODEBUDDY_API_KEY=your_codebuddy_api_key_here
 
-# 可选：显式指定模型列表，多个用逗号分隔
-# CODEBUDDY_MODELS=auto-chat
+# Optional: explicitly expose specific models, comma-separated
+# CODEBUDDY_MODELS=auto-chat,kimi-k3,hy3-high
 EOF
   echo ""
-  echo "⚠️  请编辑 $TARGET_DIR/.env，填入你的 CODEBUDDY_API_KEY，然后重新运行本脚本。"
+  echo "⚠️  Please edit $TARGET_DIR/.env with your CODEBUDDY_API_KEY and edition, then re-run this script."
   exit 0
 fi
 
-if grep -q "your_codebuddy_api_key_here\|^CODEBUDDY_API_KEY=$" .env; then
-  echo "⚠️  $TARGET_DIR/.env 里的 CODEBUDDY_API_KEY 还是占位符，请填入真实 Key 后再运行。"
+if grep -qE "your_codebuddy_api_key_here|^CODEBUDDY_API_KEY=$" .env; then
+  echo "⚠️  CODEBUDDY_API_KEY in $TARGET_DIR/.env is still a placeholder. Please fill it in and re-run."
   exit 1
 fi
 
-echo "==> 启动 CodeBuddy2api ..."
+echo "==> Starting CodeBuddy2api ..."
 python web.py

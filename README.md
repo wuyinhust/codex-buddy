@@ -1,27 +1,45 @@
 # codex-buddy
 
-> Use **Tencent CodeBuddy** as the model backend for **OpenAI Codex**.
+> Access most Chinese LLMs — **Kimi K3**, **Hunyuan3 (Hy3)**, **DeepSeek-V4**, **GLM-5.2**, **MiniMax-M3** — inside **OpenAI Codex** through Tencent CodeBuddy.
 
 [English](README.md) · [简体中文](README_ZH.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-`codex-buddy` is a local proxy setup that bridges Codex's **Responses API** to CodeBuddy's **Chat Completions**, so you can run CodeBuddy-powered agent loops inside **Codex App** or **Codex CLI**.
+`codex-buddy` is a local proxy setup that wires Codex's **Responses API** to CodeBuddy's **Chat Completions**, so you can use CodeBuddy's aggregated model catalog as the brain behind Codex App / CLI.
 
 ```mermaid
 flowchart LR
     Codex["Codex App / CLI"] -->|Responses API| Gateway["opencodex\n127.0.0.1:10100"]
     Gateway -->|Chat Completions| Proxy["CodeBuddy2api\n127.0.0.1:8001"]
-    Proxy --> CodeBuddy["CodeBuddy CN"]
+    Proxy --> CodeBuddy["CodeBuddy CN / Global"]
+    CodeBuddy --> Models["Kimi / Hunyuan / DeepSeek / GLM / MiniMax / GPT / Claude"]
 ```
 
 ---
 
-## Why
+## Why CodeBuddy
 
-Codex (App / CLI) dropped `wire_api="chat"` in 2026 and now only speaks **OpenAI Responses API**. CodeBuddy has no public Responses endpoint; it exposes a private chat API that the community wraps as **Chat Completions**. A local gateway is required to translate between the two.
+Instead of configuring Codex against a single model provider, CodeBuddy gives you a **unified gateway** to most domestic Chinese models:
 
-`CodeBuddy2api` has been verified at the source level to forward `tools` / `tool_calls` transparently, so Codex's read-edit-run agent loop is preserved. End-to-end function calling still depends on whether your CodeBuddy account/model has function calling enabled.
+| Model | Version | Note |
+|-------|---------|------|
+| **Kimi K3** | China | Latest Moonshot model; rolling out, currently prioritized for enterprise/subscribers |
+| **Hy3 High** | China | Hunyuan3 reasoning model, **limited-time free** |
+| **GLM-5.2 / 5.1 / 5v-Turbo** | China | Zhipu flagship series |
+| **MiniMax-M3** | China | Cost-efficient daily driver |
+| **Kimi-K2.7-Code / K2.6 / K2.5** | China | Coding-optimized and multimodal variants |
+| **DeepSeek-V4-Pro / Flash High** | China | Reasoning models |
+| **GPT-5 / Claude-4 / Gemini-2.5** | International | Available via CodeBuddy International (`codebuddy.ai`) |
+
+CodeBuddy has **two editions**:
+
+| Edition | Domain | Login | Typical models |
+|---------|--------|-------|----------------|
+| **China** | `copilot.tencent.com` | Tencent Cloud account | Kimi, Hunyuan, DeepSeek, GLM, MiniMax |
+| **International** | `codebuddy.ai` | CodeBuddy account | GPT-5, Claude-4, Gemini-2.5, plus configurable OpenAI-compatible endpoints |
+
+Both editions are supported by the proxy via `CODEBUDDY_INTERNET_ENVIRONMENT`.
 
 ---
 
@@ -33,15 +51,27 @@ Codex (App / CLI) dropped `wire_api="chat"` in 2026 and now only speaks **OpenAI
 ./scripts/setup-codebuddy2api.sh
 ```
 
-The script clones [`Sliverkiss/CodeBuddy2api`](https://github.com/Sliverkiss/CodeBuddy2api), creates a Python venv, installs dependencies, and prompts you to fill `CODEBUDDY_API_KEY` in `CodeBuddy2api/.env`. Re-run the script after editing `.env` to start the proxy on `127.0.0.1:8001`.
+The script clones [`Sliverkiss/CodeBuddy2api`](https://github.com/Sliverkiss/CodeBuddy2api), creates a venv, installs dependencies, and asks for your `CODEBUDDY_API_KEY`. Edit `CodeBuddy2api/.env`, then re-run the script.
 
-Verify:
+To target the **International** edition, set this in `CodeBuddy2api/.env`:
+
+```bash
+CODEBUDDY_INTERNET_ENVIRONMENT=public
+```
+
+For the **China** edition (default):
+
+```bash
+CODEBUDDY_INTERNET_ENVIRONMENT=internal
+```
+
+Verify it is healthy:
 
 ```bash
 curl http://127.0.0.1:8001/codebuddy/v1/models
 ```
 
-### 2. Register CodeBuddy with opencodex
+### 2. Register CodeBuddy in opencodex
 
 ```bash
 npm install -g @bitkyc08/opencodex
@@ -55,27 +85,63 @@ ocx provider add codebuddy \
   --sync
 ```
 
-`--api-key dummy` is fine because real authentication happens inside CodeBuddy2api. `--allow-private-network` is required since CodeBuddy2api runs on `127.0.0.1`.
+`--api-key dummy` is fine: real authentication is handled by CodeBuddy2api. `--allow-private-network` is required because the proxy runs on `127.0.0.1`.
 
-### 3. Start the gateway and open Codex
+### 3. Start the gateway and use Codex
 
 ```bash
 ocx start
 ```
 
-Then open **Codex App** or run `codex`, and select the CodeBuddy model from the model picker.
+Open **Codex App** or run `codex`. CodeBuddy models now appear in the model picker.
+
+---
+
+## Select a Specific Model
+
+Use opencodex's `provider/model` routing:
+
+```bash
+# CLI
+ codex -m "codebuddy/kimi-k3" "refactor this function"
+ codex -m "codebuddy/hy3-high" "explain this algorithm"
+```
+
+In **Codex App**, pick the model directly from the picker. To browse available models visually, run:
+
+```bash
+ocx gui
+```
 
 ---
 
 ## Let Codex Configure Itself
 
-Copy the contents of [`PROMPT.md`](PROMPT.md) into a Codex chat. Codex will run the full setup, ask for your API key, start both background services, and verify that `tool_calls` work.
+Copy the contents of [`PROMPT.md`](PROMPT.md) into a Codex chat. Codex will install, configure, start, and verify the proxy automatically.
+
+---
+
+## Run opencodex as a Background Service
+
+So you don't need to keep a terminal open:
+
+```bash
+ocx service install
+ocx service start
+```
+
+Stop or restore at any time:
+
+```bash
+ocx stop        # stop proxy and restore native Codex
+ocx restore     # restore Codex config without stopping
+```
 
 ---
 
 ## Verify Tool Calling
 
-Check that CodeBuddy returns `tool_calls`:
+Confirm CodeBuddy returns `tool_calls` before relying on agent features:
 
 ```bash
 curl http://127.0.0.1:8001/codebuddy/v1/chat/completions \
@@ -88,17 +154,7 @@ curl http://127.0.0.1:8001/codebuddy/v1/chat/completions \
   }'
 ```
 
-If the response contains `"tool_calls"`, the chain is ready. If not, your CodeBuddy account/model does not have function calling enabled yet.
-
----
-
-## Restore
-
-To switch back to the official OpenAI model:
-
-```bash
-ocx restore
-```
+If the response contains `"tool_calls"`, Codex can read, edit, and execute. If not, your CodeBuddy account/model does not have function calling enabled.
 
 ---
 
@@ -107,8 +163,8 @@ ocx restore
 ```
 codex-buddy/
 ├── README.md                 # This file
-├── README_ZH.md              # 中文版
-├── PROMPT.md                 # Prompt you can paste into Codex
+├── README_ZH.md              # 简体中文
+├── PROMPT.md                 # Paste into Codex to auto-configure
 ├── scripts/
 │   └── setup-codebuddy2api.sh # Start CodeBuddy2api
 ├── TROUBLESHOOTING.md        # Common issues
