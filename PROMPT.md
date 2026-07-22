@@ -1,8 +1,8 @@
-# Auto-Configure codex-buddy
+# Configure codex-buddy safely
 
-Please set up codex-buddy for me: wire OpenAI Codex to Tencent CodeBuddy so I can use CodeBuddy's model catalog (Kimi K3, Hunyuan3 Hy3, DeepSeek-V4, GLM-5.2, MiniMax-M3, etc.) inside Codex.
+Configure the local codex-buddy gateway so GPT can plan and review while Kimi/Hy3 and other CodeBuddy models execute sub-tasks in the same request.
 
-Run the steps below in order. Report the result of each step before moving on. If a step fails, stop and ask for help.
+Do not install or run `opencodex`, `ocx start`, `ocx restore`, or any command that rewrites Codex configuration or login state. Do not start services without explicit user approval.
 
 ## Pre-requisites
 
@@ -12,57 +12,36 @@ This machine needs `python3`, `node`, `npm`, `git`, and `curl`. Verify them firs
 command -v python3 && command -v node && command -v npm && command -v git && command -v curl
 ```
 
-## 1. Start CodeBuddy2api
+## 1. Prepare CodeBuddy2api
 
-From the repository root, run:
-
-```bash
-./scripts/setup-codebuddy2api.sh
-```
-
-- The script clones CodeBuddy2api and prepares a `.env` file.
-- If it stops and asks for an API key, edit `CodeBuddy2api/.env`:
-  - `CODEBUDDY_INTERNET_ENVIRONMENT=internal` for the China edition (default)
-  - `CODEBUDDY_INTERNET_ENVIRONMENT=public` for the International edition
-  - `CODEBUDDY_API_KEY=your_codebuddy_api_key`
-- Then re-run `./scripts/setup-codebuddy2api.sh` to start the proxy.
-
-Wait until it is healthy:
+From the repository root, inspect the script. Do not execute it or start CodeBuddy2api automatically:
 
 ```bash
-for i in {1..30}; do
-  curl -s http://127.0.0.1:8001/codebuddy/v1/models >/dev/null && echo "CodeBuddy2api OK" && break
-  sleep 1
-done
+sed -n '1,220p' scripts/setup-codebuddy2api.sh
 ```
 
-## 2. Register CodeBuddy in opencodex
+If the user later explicitly approves setup, configure the separate CodeBuddy2api
+environment with `CODEBUDDY_INTERNET_ENVIRONMENT` and `CODEBUDDY_API_KEY`; do not
+modify Codex configuration.
+
+## 2. Configure the orchestrated gateway
 
 ```bash
-npm install -g @bitkyc08/opencodex
-
-ocx provider add codebuddy \
-  --adapter openai-compatible \
-  --base-url http://127.0.0.1:8001/codebuddy/v1 \
-  --api-key dummy \
-  --allow-private-network \
-  --set-default \
-  --sync
+export CODEBUDDY_ORCHESTRATE=1
+export ORCHESTRATOR_API_KEY="your_openai_api_key"
+export ORCHESTRATOR_MODEL="gpt-4o-mini"
+export WORKER_BASE_URLS="http://127.0.0.1:8001/codebuddy/v1"
+export WORKER_DEFAULT_MODEL="kimi-k3"
+export WORKER_FALLBACK_MODEL="hy3-high"
 ```
 
-## 3. Start the gateway
+When the user explicitly approves service startup, run the bundled gateway only:
 
 ```bash
-ocx start
+python codex-buddy-gateway.py
 ```
 
-Check health:
-
-```bash
-ocx health
-```
-
-## 4. Verify tool calling
+## 3. Verify tool calling
 
 Run this curl and confirm the response contains `"tool_calls"`:
 
@@ -77,12 +56,6 @@ curl http://127.0.0.1:8001/codebuddy/v1/chat/completions \
   }'
 ```
 
-## 5. Report completion
+## 4. Report completion
 
-Tell me the setup is done and list the running background processes (CodeBuddy2api and opencodex) with their PIDs.
-
-If I later want to switch back to the official OpenAI model, run:
-
-```bash
-ocx restore
-```
+Report configuration only. Do not claim that a service is running unless the user explicitly approved startup and it was actually started.

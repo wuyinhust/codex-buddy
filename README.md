@@ -10,7 +10,7 @@
 
 ```mermaid
 flowchart LR
-    Codex["Codex App / CLI"] -->|Responses API| Gateway["opencodex\n127.0.0.1:10100"]
+    Codex["Codex App / CLI"] -->|Responses API| Gateway["codex-buddy-gateway\n127.0.0.1:8787"]
     Gateway -->|Chat Completions| Proxy["CodeBuddy2api\n127.0.0.1:8001"]
     Proxy --> CodeBuddy["CodeBuddy CN / Global"]
     CodeBuddy --> Models["Kimi / Hunyuan / DeepSeek / GLM / MiniMax / GPT / Claude"]
@@ -71,73 +71,38 @@ Verify it is healthy:
 curl http://127.0.0.1:8001/codebuddy/v1/models
 ```
 
-### 2. Register CodeBuddy in opencodex
+### 2. Start the bundled gateway
 
 ```bash
-npm install -g @bitkyc08/opencodex
-
-ocx provider add codebuddy \
-  --adapter openai-compatible \
-  --base-url http://127.0.0.1:8001/codebuddy/v1 \
-  --api-key dummy \
-  --allow-private-network \
-  --set-default \
-  --sync
+python codex-buddy-gateway.py
 ```
 
-`--api-key dummy` is fine: real authentication is handled by CodeBuddy2api. `--allow-private-network` is required because the proxy runs on `127.0.0.1`.
-
-### 3. Start the gateway and use Codex
-
-```bash
-ocx start
-```
-
-Open **Codex App** or run `codex`. CodeBuddy models now appear in the model picker.
+Point a separate Codex API-base/profile at `http://127.0.0.1:8787/v1` with Responses mode. This project does not modify Codex login state.
 
 ---
 
 ## Select a Specific Model
 
-Use opencodex's `provider/model` routing:
+Use CodeBuddy model names in the request:
 
 ```bash
-# CLI
- codex -m "codebuddy/kimi-k3" "refactor this function"
- codex -m "codebuddy/hy3-high" "explain this algorithm"
+# Examples
+kimi-k3
+hy3-high
+auto-chat
 ```
 
-In **Codex App**, pick the model directly from the picker. To browse available models visually, run:
-
-```bash
-ocx gui
-```
+The gateway forwards the requested model to CodeBuddy2api.
 
 ---
 
 ## Let Codex Configure Itself
 
-Copy the contents of [`PROMPT.md`](PROMPT.md) into a Codex chat. Codex will install, configure, start, and verify the proxy automatically.
+Read [`PROMPT.md`](PROMPT.md) for the safe, non-starting configuration procedure.
 
 ---
 
-## Run opencodex as a Local Background Service
-
-> Note: `opencodex` is a separate community open-source project (installed via npm). This section only describes how to use its background-service feature; it is not our code or service.
-
-So you don't need to keep a terminal open:
-
-```bash
-ocx service install
-ocx service start
-```
-
-Stop or restore at any time:
-
-```bash
-ocx stop        # stop proxy and restore native Codex
-ocx restore     # restore Codex config without stopping
-```
+Do not use `opencodex` or `ocx start` if preserving Codex's official login and configuration is important.
 
 ---
 
@@ -160,9 +125,24 @@ If the response contains `"tool_calls"`, Codex can read, edit, and execute. If n
 
 ---
 
-## Bridge Without opencodex: codex-buddy-gateway
+## GPT Orchestrates CodeBuddy in the Same Request
 
-If you prefer not to install `opencodex`, the repo ships a lightweight gateway, `codex-buddy-gateway.py`. It translates Codex's **Responses API** (`/v1/responses`) into CodeBuddy2api's **Chat Completions** (`/v1/chat/completions`) in real time — including streaming `tool_calls` translation so Codex can use tools normally.
+Set the opt-in orchestration mode before starting the bundled gateway:
+
+```bash
+export CODEBUDDY_ORCHESTRATE=1
+export ORCHESTRATOR_API_KEY="your OpenAI API key"
+export ORCHESTRATOR_MODEL="gpt-4o-mini"
+export WORKER_BASE_URLS="http://127.0.0.1:8001/codebuddy/v1"
+export WORKER_DEFAULT_MODEL="kimi-k3"
+export WORKER_FALLBACK_MODEL="hy3-high"
+```
+
+For each Codex request the gateway performs **plan → delegate → review**:
+
+1. GPT receives the current Codex conversation and breaks it into sub-tasks.
+2. CodeBuddy models execute the sub-tasks.
+3. GPT synthesizes the results and returns one answer to the same Codex request.
 
 ```mermaid
 flowchart LR
@@ -200,13 +180,9 @@ python test_gateway_dryrun.py   # mock upstream; no real model needed
 
 ---
 
-## GPT-Kimi Orchestrator
+## Standalone GPT-Kimi Orchestrator
 
-If you want GPT to act as the director and Kimi as the actor, use `gpt-kimi-orchestrator.py`. It splits work into **plan → delegate → review**:
-
-1. **Plan**: GPT breaks the request into sub-tasks and assigns a model to each.
-2. **Delegate**: Each sub-task is sent to a CodeBuddy model (default `kimi-k3`).
-3. **Review**: GPT synthesizes the sub-task results into the final answer.
+The same orchestration logic is also available as `gpt-kimi-orchestrator.py` for CLI use outside Codex.
 
 ### Install dependencies
 

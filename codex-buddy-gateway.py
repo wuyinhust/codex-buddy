@@ -30,6 +30,8 @@ import os
 import json
 import time
 import secrets
+import sys
+import importlib.util
 from typing import Any, Dict, List, Optional, Generator
 from dotenv import load_dotenv
 
@@ -49,6 +51,82 @@ CODEBUDDY_API_KEY = os.getenv("CODEBUDDY_API_KEY", "dummy")
 CODEBUDDY_MODEL = os.getenv("CODEBUDDY_MODEL", "kimi-k3")
 GATEWAY_HOST = os.getenv("GATEWAY_HOST", "127.0.0.1")
 GATEWAY_PORT = int(os.getenv("GATEWAY_PORT", "8787"))
+ORCHESTRATE = os.getenv("CODEBUDDY_ORCHESTRATE", "0").lower() in {"1", "true", "yes", "on"}
+
+
+def run_orchestrated_turn(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Run one Codex turn through GPT planner -> CodeBuddy workers -> GPT review.
+
+    This is opt-in so the gateway remains a transparent Responses bridge by default.
+    The existing orchestrator owns provider selection and worker fallback; the whole
+    translated conversation is supplied as the task context for this turn.
+    """
+    module_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gpt-kimi-orchestrator.py")
+    spec = importlib.util.spec_from_file_location("codex_buddy_orchestrator", module_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Unable to load gpt-kimi-orchestrator.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+
+    messages = translate_input(body.get("input"))
+    conversation = "\n\n".join(
+        f"{message.get('role', 'user').upper()}: {message.get('content', '')}"
+        for message in messages
+    )
+    task = (
+        "Work on the user's current Codex conversation. Preserve the conversation context "
+        "and return a useful final answer. Delegate implementation/research sub-tasks to "
+        "the configured CodeBuddy worker models.\n\nCONVERSATION:\n" + conversation
+    )
+
+    orchestrator = module.Orchestrator()
+    tasks = orchestrator.plan(task)
+    # If the planner returns no work, still let the reviewer answer the conversation.
+    if tasks:
+        orchestrator.execute(tasks)
+    answer = orchestrator.review(task)
+    return {
+        "id": generate_response_id(),
+        "object": "response",
+        "created_at": now_ts(),
+        "status": "completed",
+        "model": os.getenv("ORCHESTRATOR_MODEL", "gpt-4o-mini"),
+        "output": [{
+            "type": "message",
+            "role": "assistant",
+            "status": "completed",
+            "content": [{"type": "output_text", "text": answer}],
+        }],
+    }
+
+
+def orchestrated_sse(body: Dict[str, Any]) -> Generator[str, None, None]:
+    """Expose the orchestrated result as the small Responses SSE sequence Codex needs."""
+    response = run_orchestrated_turn(body)
+    output = response["output"][0]
+    text = output["content"][0]["text"]
+    yield sse_event("response.created", {"type": "response.created", "response": response})
+    yield sse_event("response.output_item.added", {
+        "type": "response.output_item.added", "output_index": 0,
+        "item": {"type": "message", "role": "assistant", "status": "in_progress"},
+    })
+    yield sse_event("response.content_part.added", {
+        "type": "response.content_part.added", "output_index": 0,
+        "content_index": 0, "part": {"type": "output_text", "text": ""},
+    })
+    if text:
+        yield sse_event("response.output_text.delta", {
+            "type": "response.output_text.delta", "output_index": 0,
+            "content_index": 0, "delta": text,
+        })
+    yield sse_event("response.content_part.done", {
+        "type": "response.content_part.done", "output_index": 0, "content_index": 0,
+    })
+    yield sse_event("response.output_item.done", {
+        "type": "response.output_item.done", "output_index": 0, "item": output,
+    })
+    yield sse_event("response.completed", {"type": "response.completed", "response": response})
 
 
 # ---------- small helpers ----------
@@ -493,6 +571,18 @@ async def create_response(request: Request):
         body = await request.json()
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {exc}")
+
+    if ORCHESTRATE:
+        if body.get("stream", True):
+            return StreamingResponse(
+                orchestrated_sse(body),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+            )
+        try:
+            return JSONResponse(run_orchestrated_turn(body))
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
 
     if body.get("stream", True):
         return StreamingResponse(
